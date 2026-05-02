@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Eye, EyeOff, Plus, Trash2,
   User, MapPin, Activity, Phone, AtSign,
   Target, Video, BarChart2, ChevronDown,
-  AlertCircle, CheckCircle, Loader2,
+  AlertCircle, CheckCircle, Loader2, Camera, Upload,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -89,6 +89,13 @@ export default function PlayerProfilePage() {
   const [saveMsg, setSaveMsg]     = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
+  // Photo
+  const [photoUrl, setPhotoUrl]             = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview]     = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError]         = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Basic Info
   const [fullName, setFullName]       = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -161,6 +168,7 @@ export default function PlayerProfilePage() {
         setVideo2(prof.video_link_2 ?? "");
         setVideo3(prof.video_link_3 ?? "");
         setIsVisible(prof.is_visible ?? true);
+        setPhotoUrl((prof as Record<string, unknown>).profile_picture_url as string ?? null);
         const rawStats = (prof as Record<string, unknown>).season_stats;
         if (Array.isArray(rawStats)) {
           setStats(
@@ -201,6 +209,46 @@ export default function PlayerProfilePage() {
     setStats(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
   }
 
+  async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPhotoError("Please upload a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError("Image must be under 5MB.");
+      return;
+    }
+
+    setPhotoError(null);
+    setPhotoPreview(URL.createObjectURL(file));
+    setUploadingPhoto(true);
+
+    const ext = file.type === "image/jpeg" ? "jpg" : file.type === "image/png" ? "png" : "webp";
+    const filePath = `${userId}/avatar.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("player-avatars")
+      .upload(filePath, file, { upsert: true, contentType: file.type });
+
+    if (uploadError) {
+      setPhotoError(`Upload failed: ${uploadError.message}`);
+      setPhotoPreview(null);
+      setUploadingPhoto(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("player-avatars")
+      .getPublicUrl(filePath);
+
+    setPhotoUrl(urlData.publicUrl);
+    setUploadingPhoto(false);
+    e.target.value = "";
+  }
+
   async function handleSave() {
     if (!userId) return;
     setSaving(true);
@@ -228,6 +276,7 @@ export default function PlayerProfilePage() {
       video_link_3: video3 || null,
       is_visible: isVisible,
       season_stats: stats.map(({ id: _id, ...rest }) => rest),
+      profile_picture_url: photoUrl || null,
     };
 
     if (dateOfBirth) payload.date_of_birth = dateOfBirth;
@@ -247,9 +296,10 @@ export default function PlayerProfilePage() {
 
     // If new columns don't exist yet, retry without them
     if (error?.message?.includes("column") &&
-        (error.message.includes("date_of_birth") || error.message.includes("season_stats"))) {
+        (error.message.includes("date_of_birth") || error.message.includes("season_stats") || error.message.includes("profile_picture_url"))) {
       delete payload.date_of_birth;
       delete payload.season_stats;
+      delete payload.profile_picture_url;
       const { error: e2 } = profileId
         ? await supabase.from("player_profiles").update(payload).eq("id", profileId)
         : await supabase.from("player_profiles").insert(payload);
@@ -383,6 +433,77 @@ export default function PlayerProfilePage() {
               }`} />
             </div>
           </button>
+        </div>
+
+        {/* ── 0. Profile Photo ── */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+            <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0">
+              <Camera size={15} className="text-gold" />
+            </div>
+            <h2 className="font-bold text-white text-sm">Profile Photo</h2>
+          </div>
+          <div className="px-6 py-6">
+            <div className="flex items-center gap-6">
+              {/* Avatar preview */}
+              <div className="relative flex-shrink-0">
+                <div className="w-24 h-24 rounded-2xl overflow-hidden border-2 border-white/10 flex items-center justify-center bg-gold/10">
+                  {uploadingPhoto ? (
+                    <Loader2 size={28} className="text-gold animate-spin" />
+                  ) : (photoPreview || photoUrl) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={photoPreview ?? photoUrl ?? ""}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-3xl font-black text-gold">
+                      {fullName ? fullName.charAt(0).toUpperCase() : "?"}
+                    </span>
+                  )}
+                </div>
+                {(photoPreview || photoUrl) && !uploadingPhoto && (
+                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-navy flex items-center justify-center">
+                    <CheckCircle size={12} className="text-white" />
+                  </div>
+                )}
+              </div>
+
+              {/* Upload controls */}
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-semibold text-sm mb-1">
+                  {photoUrl || photoPreview ? "Change profile photo" : "Upload a profile photo"}
+                </p>
+                <p className="text-white/40 text-xs mb-3">
+                  JPG, PNG or WebP · Max 5MB · Square crops work best
+                </p>
+                {photoError && (
+                  <p className="text-red-400 text-xs mb-3 flex items-center gap-1.5">
+                    <AlertCircle size={12} />
+                    {photoError}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingPhoto}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gold/30 bg-gold/[0.06] text-gold text-sm font-semibold hover:bg-gold/[0.12] transition-all disabled:opacity-50"
+                >
+                  <Upload size={14} />
+                  {uploadingPhoto ? "Uploading…" : (photoUrl || photoPreview) ? "Change Photo" : "Upload Photo"}
+                </button>
+              </div>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePhotoSelect}
+            />
+          </div>
         </div>
 
         {/* ── 1. Basic Info ── */}
@@ -739,10 +860,15 @@ export default function PlayerProfilePage() {
 
               {/* Identity block */}
               <div className="flex items-start gap-5">
-                <div className="w-16 h-16 rounded-2xl bg-gold/15 border border-gold/30 flex items-center justify-center flex-shrink-0">
-                  <span className="text-2xl font-black text-gold">
-                    {fullName ? fullName.charAt(0).toUpperCase() : "?"}
-                  </span>
+                <div className="w-16 h-16 rounded-2xl overflow-hidden border border-gold/30 flex items-center justify-center flex-shrink-0 bg-gold/15">
+                  {(photoPreview || photoUrl) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={photoPreview ?? photoUrl ?? ""} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl font-black text-gold">
+                      {fullName ? fullName.charAt(0).toUpperCase() : "?"}
+                    </span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h2 className="text-2xl font-black text-white">{fullName || "No name set"}</h2>

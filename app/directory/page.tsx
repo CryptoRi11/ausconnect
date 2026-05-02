@@ -51,6 +51,7 @@ type Player = {
   weight_kg: number | null;
   season_stats: StatRow[] | null;
   avg_composite: number | null;
+  profile_picture_url: string | null;
 };
 
 function getAge(dob: string): number | null {
@@ -130,10 +131,19 @@ function FilterSelect({
   );
 }
 
-function PlayerAvatar({ name, dim = false }: {
+function PlayerAvatar({ name, photoUrl, dim = false }: {
   name: string | null;
+  photoUrl?: string | null;
   dim?: boolean;
 }) {
+  if (photoUrl && !dim) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <div className="w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 border border-gold/30">
+        <img src={photoUrl} alt={name ?? "Player"} className="w-full h-full object-cover" />
+      </div>
+    );
+  }
   return (
     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-lg ${dim ? "bg-white/5 border border-white/10" : "bg-gold/15 border border-gold/30"}`}>
       <span className={`font-black ${dim ? "text-white/25" : "text-gold"}`}>{initials(name)}</span>
@@ -151,7 +161,7 @@ function FullCard({ player }: { player: Player }) {
     <div className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:border-gold/30 hover:bg-white/[0.05] transition-all duration-300 hover:-translate-y-0.5 overflow-hidden flex flex-col">
       <div className="p-5 pb-4">
         <div className="flex items-start gap-4">
-          <PlayerAvatar name={player.full_name} />
+          <PlayerAvatar name={player.full_name} photoUrl={player.profile_picture_url} />
           <div className="flex-1 min-w-0">
             <h3 className="font-black text-white text-base leading-tight truncate">
               {player.full_name ?? "—"}
@@ -356,7 +366,7 @@ export default function DirectoryPage() {
       const { data: raw, error: rawError } = await supabase
         .from("player_profiles")
         .select(
-          "id, full_name, date_of_birth, position, current_team, location_city, location_state, height_cm, weight_kg, season_stats"
+          "id, full_name, date_of_birth, position, current_team, location_city, location_state, height_cm, weight_kg, season_stats, profile_picture_url"
         )
         .eq("is_visible", true)
         .order("created_at", { ascending: false });
@@ -392,6 +402,7 @@ export default function DirectoryPage() {
           ...r,
           season_stats: Array.isArray(r.season_stats) ? (r.season_stats as StatRow[]) : null,
           avg_composite: evalMap[r.id] ?? null,
+          profile_picture_url: (r as Record<string, unknown>).profile_picture_url as string ?? null,
         }))
       );
       setLoading(false);
